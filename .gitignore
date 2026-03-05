@@ -1,0 +1,26 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+azure_server.exe
+server_*.exe
+bench_*.exe
+
+# Test results
+*.test
+*.out
+
+# Editor directories and files
+.vscode/*
+.idea/*
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go workspace file
+go.work

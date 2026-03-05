@@ -1,0 +1,59 @@
+package azure
+
+import "github.com/golang/azure/ultrahttp"
+
+// Context контекст запроса
+type Context struct {
+	ultra *ultrahttp.Context
+}
+
+// Json отправляет JSON ответ
+func (c *Context) Json(data M) {
+	c.ultra.SetJSON(data)
+}
+
+// Send отправляет данные
+func (c *Context) Send(data []byte) {
+	c.ultra.SetBody(data)
+}
+
+// SetStatus устанавливает статус
+func (c *Context) SetStatus(code int, text string) {
+	c.ultra.SetStatus(code, text)
+}
+
+// Param получает параметр пути
+func (c *Context) Param(key string) string {
+	// TODO: реализовать когда будет поддержка параметров в роутере
+	return ""
+}
+
+// GetBody получает тело запроса
+func (c *Context) GetBody() []byte {
+	return c.ultra.GetBody()
+}
+
+// GetHeader получает заголовок
+func (c *Context) GetHeader(key string) string {
+	return c.ultra.GetHeader(key)
+}
+
+// SetHeader устанавливает заголовок ответа
+func (c *Context) SetHeader(key, value string) {
+	c.ultra.SetHeader(key, value)
+}
+
+// SetCookie устанавливает cookie
+func (c *Context) SetCookie(name, value string) {
+	c.ultra.SetCookie(name, value)
+}
+
+// GetCookie получает cookie
+func (c *Context) GetCookie(name string) (string, bool) {
+	return c.ultra.GetCookie(name)
+}
+
+// GetQueryParam получает query параметр
+func (c *Context) GetQueryParam(key string) string {
+	return c.ultra.GetQueryParam(key)
+}
