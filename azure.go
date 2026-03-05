@@ -1,7 +1,7 @@
 package azure
 
 import (
-	"github.com/golang/azure/ultrahttp"
+	"github.com/Payel-git-ol/azure/ultrahttp"
 	"log"
 )
 

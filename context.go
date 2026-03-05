@@ -1,6 +1,6 @@
 package azure
 
-import "github.com/golang/azure/ultrahttp"
+import "github.com/Payel-git-ol/azure/ultrahttp"
 
 // Context контекст запроса
 type Context struct {
