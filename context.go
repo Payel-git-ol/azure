@@ -57,3 +57,8 @@ func (c *Context) GetCookie(name string) (string, bool) {
 func (c *Context) GetQueryParam(key string) string {
 	return c.ultra.GetQueryParam(key)
 }
+
+// BindJSON парсит JSON из тела запроса в структуру
+func (c *Context) BindJSON(v interface{}) error {
+	return c.ultra.BindJSON(v)
+}

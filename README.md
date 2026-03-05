@@ -23,8 +23,14 @@ go get github.com/golang/azure
 package main
 
 import (
-	"github.com/golang/azure"
+	"github.com/Payel-git-ol/azure"
 )
+
+type User struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Age   int    `json:"age"`
+}
 
 func main() {
 	a := azure.Defoult
@@ -37,10 +43,17 @@ func main() {
 		})
 	})
 
-	// POST с JSON
+	// POST с BindJSON
 	a.Post("/user", func(c *azure.Context) {
 		var user User
-		c.ultra.BindJSON(&user)
+		
+		// Быстрый парсинг JSON
+		if err := c.BindJSON(&user); err != nil {
+			c.SetStatus(400, "Bad Request")
+			c.Json(azure.M{"error": err.Error()})
+			return
+		}
+		
 		c.SetStatus(201, "Created")
 		c.Json(azure.M{"user": user})
 	})
@@ -72,6 +85,7 @@ func main() {
 | `c.Json(data)` | Отправить JSON ответ |
 | `c.Send(bytes)` | Отправить байты |
 | `c.SetStatus(code, text)` | Установить HTTP статус |
+| `c.BindJSON(&struct)` | Парсить JSON из тела |
 | `c.GetBody()` | Получить тело запроса |
 | `c.GetHeader(key)` | Получить заголовок |
 | `c.SetHeader(key, value)` | Установить заголовок |

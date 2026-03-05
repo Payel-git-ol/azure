@@ -357,8 +357,13 @@ func (c *Context) GetCookie(name string) (string, bool) {
 }
 
 // BindJSON парсит JSON из тела запроса в структуру
+//go:noinline
 func (c *Context) BindJSON(v interface{}) error {
-	return ParseJSON(c.Request.Body, v)
+	body := c.Request.Body
+	if len(body) == 0 {
+		return nil
+	}
+	return ParseJSON(body, v)
 }
 
 // === QUERY PARAMS ===
