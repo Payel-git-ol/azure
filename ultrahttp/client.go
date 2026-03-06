@@ -62,6 +62,26 @@ func (c *HTTPClient) PostRaw(url string, contentType string, body io.Reader) ([]
 	return io.ReadAll(resp.Body)
 }
 
+// Do отправляет кастомный запрос
+func (c *HTTPClient) Do(method, url string, body []byte, headers map[string]string) ([]byte, error) {
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	
+	return io.ReadAll(resp.Body)
+}
+
 // Get отправляет GET запрос и возвращает строку
 func (c *HTTPClient) GetString(url string) (string, error) {
 	resp, err := c.Get(url)
