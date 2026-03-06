@@ -51,8 +51,8 @@ func (c *HTTPClient) Post(url string, data interface{}) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// Request отправляет кастомный запрос
-func (c *HTTPClient) Request(method, url string, body []byte, headers map[string]string) ([]byte, error) {
+// Do отправляет кастомный запрос
+func (c *HTTPClient) Do(method, url string, body []byte, headers map[string]string) ([]byte, error) {
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
@@ -83,7 +83,7 @@ func Post(url string, data interface{}) ([]byte, error) {
 	return defaultClient.Post(url, data)
 }
 
-// Request отправляет кастомный запрос
-func Request(method, url string, body []byte, headers map[string]string) ([]byte, error) {
-	return defaultClient.Request(method, url, body, headers)
+// Do отправляет кастомный запрос
+func Do(method, url string, body []byte, headers map[string]string) ([]byte, error) {
+	return defaultClient.Do(method, url, body, headers)
 }

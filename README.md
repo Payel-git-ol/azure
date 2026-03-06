@@ -126,7 +126,7 @@ resp, err := azure.Post("https://api.example.com/users", azure.M{
 })
 
 // Кастомный запрос
-resp, err := azure.Request("PUT", "https://api.example.com/users/1", 
+resp, err := azure.Do("PUT", "https://api.example.com/users/1", 
     []byte(`{"name":"Jane"}`),
     map[string]string{
         "Authorization": "Bearer token123",
@@ -135,7 +135,7 @@ resp, err := azure.Request("PUT", "https://api.example.com/users/1",
 
 // Свой клиент
 client := azure.NewHTTPClient(10 * time.Second)
-resp, err := client.Get("https://api.example.com/data")
+resp, err := client.Do("GET", "https://api.example.com/data", nil, nil)
 ```
 
 ### Middleware
