@@ -12,6 +12,11 @@ func (c *Context) Json(data M) {
 	c.ultra.SetJSON(data)
 }
 
+// JsonStatus отправляет JSON ответ со статусом
+func (c *Context) JsonStatus(status int, data M) {
+	c.ultra.SetJSONStatus(status, data)
+}
+
 // Send отправляет данные
 func (c *Context) Send(data []byte) {
 	c.ultra.SetBody(data)

@@ -54,8 +54,15 @@ func main() {
 			return
 		}
 		
-		c.SetStatus(201, "Created")
-		c.Json(azure.M{"user": user})
+		// Отправляем со статусом 201
+		c.JsonStatus(azure.StatusCreated, azure.M{"user": user})
+	})
+
+	// 404 Not Found
+	a.Get("/not-found", func(c *azure.Context) {
+		c.JsonStatus(azure.StatusNotFound, azure.M{
+			"error": "Not found",
+		})
 	})
 
 	// Запуск сервера
@@ -82,7 +89,8 @@ func main() {
 
 | Метод | Описание |
 |-------|----------|
-| `c.Json(data)` | Отправить JSON ответ |
+| `c.Json(data)` | Отправить JSON ответ (200 OK) |
+| `c.JsonStatus(code, data)` | Отправить JSON со статусом |
 | `c.Send(bytes)` | Отправить байты |
 | `c.SetStatus(code, text)` | Установить HTTP статус |
 | `c.BindJSON(&struct)` | Парсить JSON из тела |
@@ -93,6 +101,17 @@ func main() {
 | `c.GetCookie(name)` | Получить cookie |
 | `c.GetQueryParam(key)` | Получить query параметр |
 | `c.Param(key)` | Получить параметр пути |
+
+### Статусы
+
+```go
+azure.StatusOK           // 200
+azure.StatusCreated      // 201
+azure.StatusNoContent    // 204
+azure.StatusBadRequest   // 400
+azure.StatusNotFound     // 404
+azure.StatusInternalServerError // 500
+```
 
 ### Middleware
 

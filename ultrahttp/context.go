@@ -205,6 +205,20 @@ func (c *Context) SetJSON(data interface{}) {
 }
 
 //go:noinline
+func (c *Context) SetJSONStatus(status int, data interface{}) {
+	c.Response.Status = status
+	c.Response.Headers["Content-Type"] = "application/json; charset=utf-8"
+
+	if data == nil {
+		c.Response.Body = append(c.Response.Body[:0], "null"...)
+		return
+	}
+
+	buf := fastMarshalJSON(data)
+	c.Response.Body = append(c.Response.Body[:0], buf...)
+}
+
+//go:noinline
 func (c *Context) SetJSONBytes(data []byte) {
 	c.Response.Headers["Content-Type"] = "application/json; charset=utf-8"
 	c.Response.Body = append(c.Response.Body[:0], data...)

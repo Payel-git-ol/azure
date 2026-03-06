@@ -38,10 +38,30 @@ const (
 	DefaultMaxKeepAlives = 256
 )
 
+// HTTP статусы - быстрые константы
+const (
+	StatusOK           = 200
+	StatusCreated      = 201
+	StatusNoContent    = 204
+	StatusBadRequest   = 400
+	StatusUnauthorized = 401
+	StatusNotFound     = 404
+	StatusMethodNotAllowed = 405
+	StatusConflict     = 409
+	StatusTooManyRequests = 429
+	StatusInternalServerError = 500
+	StatusBadGateway   = 502
+	StatusServiceUnavailable = 503
+)
+
 // Предзаполненные шаблоны ответов
 var (
-	response404 = []byte("HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found")
-	response400 = []byte("HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request")
+	response200 = []byte("HTTP/1.1 200 OK\r\n")
+	response201 = []byte("HTTP/1.1 201 Created\r\n")
+	response204 = []byte("HTTP/1.1 204 No Content\r\n")
+	response400 = []byte("HTTP/1.1 400 Bad Request\r\n")
+	response404 = []byte("HTTP/1.1 404 Not Found\r\n")
+	response500 = []byte("HTTP/1.1 500 Internal Server Error\r\n")
 )
 
 // Таблица для быстрого парсинга чисел
