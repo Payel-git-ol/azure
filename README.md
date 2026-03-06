@@ -113,6 +113,31 @@ azure.StatusNotFound     // 404
 azure.StatusInternalServerError // 500
 ```
 
+### HTTP Клиент
+
+```go
+// GET запрос
+resp, err := azure.Get("https://api.example.com/users")
+
+// POST запрос с JSON
+resp, err := azure.Post("https://api.example.com/users", azure.M{
+    "name":  "John",
+    "email": "john@example.com",
+})
+
+// Кастомный запрос
+resp, err := azure.Request("PUT", "https://api.example.com/users/1", 
+    []byte(`{"name":"Jane"}`),
+    map[string]string{
+        "Authorization": "Bearer token123",
+        "Content-Type":  "application/json",
+    })
+
+// Свой клиент
+client := azure.NewHTTPClient(10 * time.Second)
+resp, err := client.Get("https://api.example.com/data")
+```
+
 ### Middleware
 
 ```go
