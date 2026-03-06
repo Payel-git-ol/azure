@@ -116,16 +116,24 @@ azure.StatusInternalServerError // 500
 ### HTTP Клиент
 
 ```go
-// GET запрос
+// GET запрос (возвращает []byte)
 resp, err := azure.Get("https://api.example.com/users")
 
-// POST запрос с JSON
+// GET запрос (возвращает string)
+resp, err := azure.GetString("https://api.example.com/users")
+
+// POST запрос с JSON (возвращает []byte)
 resp, err := azure.Post("https://api.example.com/users", azure.M{
     "name":  "John",
     "email": "john@example.com",
 })
 
-// Кастомный запрос
+// POST запрос с JSON (возвращает string)
+resp, err := azure.PostString("https://api.example.com/users", azure.M{
+    "name": "John",
+})
+
+// Кастомный запрос (возвращает []byte)
 resp, err := azure.Do("PUT", "https://api.example.com/users/1", 
     []byte(`{"name":"Jane"}`),
     map[string]string{
@@ -133,9 +141,13 @@ resp, err := azure.Do("PUT", "https://api.example.com/users/1",
         "Content-Type":  "application/json",
     })
 
+// Кастомный запрос (возвращает string)
+resp, err := azure.DoString("PUT", "https://api.example.com/users/1", 
+    []byte(`{"name":"Jane"}`), nil)
+
 // Свой клиент
 client := azure.NewHTTPClient(10 * time.Second)
-resp, err := client.Do("GET", "https://api.example.com/data", nil, nil)
+resp, err := client.GetString("https://api.example.com/data")
 ```
 
 ### Middleware

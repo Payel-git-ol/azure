@@ -62,24 +62,31 @@ func (c *HTTPClient) PostRaw(url string, contentType string, body io.Reader) ([]
 	return io.ReadAll(resp.Body)
 }
 
-// Do отправляет кастомный запрос
-func (c *HTTPClient) Do(method, url string, body []byte, headers map[string]string) ([]byte, error) {
-	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+// Get отправляет GET запрос и возвращает строку
+func (c *HTTPClient) GetString(url string) (string, error) {
+	resp, err := c.Get(url)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	
-	for key, value := range headers {
-		req.Header.Set(key, value)
-	}
-	
-	resp, err := c.client.Do(req)
+	return string(resp), nil
+}
+
+// Post отправляет POST запрос с JSON и возвращает строку
+func (c *HTTPClient) PostString(url string, data interface{}) (string, error) {
+	resp, err := c.Post(url, data)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	defer resp.Body.Close()
-	
-	return io.ReadAll(resp.Body)
+	return string(resp), nil
+}
+
+// Do отправляет кастомный запрос и возвращает строку
+func (c *HTTPClient) DoString(method, url string, body []byte, headers map[string]string) (string, error) {
+	resp, err := c.Do(method, url, body, headers)
+	if err != nil {
+		return "", err
+	}
+	return string(resp), nil
 }
 
 // === Функции уровня пакета ===
@@ -89,12 +96,27 @@ func Get(url string) ([]byte, error) {
 	return defaultClient.Get(url)
 }
 
+// GetString отправляет GET запрос и возвращает строку
+func GetString(url string) (string, error) {
+	return defaultClient.GetString(url)
+}
+
 // Post отправляет POST запрос с JSON (использует клиент по умолчанию)
 func Post(url string, data interface{}) ([]byte, error) {
 	return defaultClient.Post(url, data)
 }
 
+// PostString отправляет POST запрос с JSON и возвращает строку
+func PostString(url string, data interface{}) (string, error) {
+	return defaultClient.PostString(url, data)
+}
+
 // Do отправляет кастомный запрос (использует клиент по умолчанию)
 func Do(method, url string, body []byte, headers map[string]string) ([]byte, error) {
 	return defaultClient.Do(method, url, body, headers)
+}
+
+// DoString отправляет кастомный запрос и возвращает строку
+func DoString(method, url string, body []byte, headers map[string]string) (string, error) {
+	return defaultClient.DoString(method, url, body, headers)
 }
