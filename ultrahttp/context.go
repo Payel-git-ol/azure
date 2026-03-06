@@ -243,12 +243,6 @@ func (c *Context) SetText(text string) {
 	c.Response.Body = append(c.Response.Body[:0], text...)
 }
 
-//go:noinline
-func (c *Context) SetHTML(html string) {
-	c.Response.Headers["Content-Type"] = "text/html; charset=utf-8"
-	c.Response.Body = append(c.Response.Body[:0], html...)
-}
-
 // === КВАЗИ-ROUTERS ===
 
 // RouteMatcher функция для матчинга путей
