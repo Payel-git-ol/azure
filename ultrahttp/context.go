@@ -225,6 +225,19 @@ func (c *Context) SetJSONBytes(data []byte) {
 }
 
 //go:noinline
+func (c *Context) SetHTML(html string) {
+	c.Response.Headers["Content-Type"] = "text/html; charset=utf-8"
+	c.Response.Body = append(c.Response.Body[:0], html...)
+}
+
+//go:noinline
+func (c *Context) SetHTMLStatus(status int, html string) {
+	c.Response.Status = status
+	c.Response.Headers["Content-Type"] = "text/html; charset=utf-8"
+	c.Response.Body = append(c.Response.Body[:0], html...)
+}
+
+//go:noinline
 func (c *Context) SetText(text string) {
 	c.Response.Headers["Content-Type"] = "text/plain; charset=utf-8"
 	c.Response.Body = append(c.Response.Body[:0], text...)

@@ -17,6 +17,17 @@ func (c *Context) JsonStatus(status int, data M) {
 	c.ultra.SetJSONStatus(status, data)
 }
 
+// Html отправляет HTML ответ
+func (c *Context) Html(html string) {
+	c.ultra.SetHTML(html)
+}
+
+// HtmlStatus отправляет HTML ответ со статусом
+func (c *Context) HtmlStatus(status int, html string) {
+	c.ultra.SetStatus(status, "")
+	c.ultra.SetHTML(html)
+}
+
 // Send отправляет данные
 func (c *Context) Send(data []byte) {
 	c.ultra.SetBody(data)

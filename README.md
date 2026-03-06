@@ -65,6 +65,21 @@ func main() {
 		})
 	})
 
+	// HTML страница
+	a.Get("/page", func(c *azure.Context) {
+		c.Html(`<!DOCTYPE html>
+<html>
+<head><title>My Page</title></head>
+<body><h1>Hello World!</h1></body>
+</html>`)
+	})
+
+	// HTML со статусом
+	a.Get("/error-page", func(c *azure.Context) {
+		c.HtmlStatus(500, `<!DOCTYPE html>
+<html><body><h1>Server Error</h1></body></html>`)
+	})
+
 	// Запуск сервера
 	a.Run(":8080")
 }
@@ -91,6 +106,8 @@ func main() {
 |-------|----------|
 | `c.Json(data)` | Отправить JSON ответ (200 OK) |
 | `c.JsonStatus(code, data)` | Отправить JSON со статусом |
+| `c.Html(html)` | Отправить HTML ответ |
+| `c.HtmlStatus(code, html)` | Отправить HTML со статусом |
 | `c.Send(bytes)` | Отправить байты |
 | `c.SetStatus(code, text)` | Установить HTTP статус |
 | `c.BindJSON(&struct)` | Парсить JSON из тела |
