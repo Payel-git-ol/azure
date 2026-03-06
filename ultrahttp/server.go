@@ -170,11 +170,11 @@ var (
 //
 //go:noinline
 func NewServer(addr string, handler Handler) *Server {
-	workers := runtime.GOMAXPROCS(0)
-	if workers <= 0 {
-		workers = 4
-	} else if workers > 32 {
-		workers = 32
+	workers := runtime.GOMAXPROCS(0) * 2  // 2x ядра для лучшей конкурентности
+	if workers < 8 {
+		workers = 8
+	} else if workers > 64 {
+		workers = 64
 	}
 
 	return &Server{
@@ -185,7 +185,7 @@ func NewServer(addr string, handler Handler) *Server {
 		writeTimeout:  DefaultWriteTimeout,
 		idleTimeout:   DefaultIdleTimeout,
 		maxKeepAlives: DefaultMaxKeepAlives,
-		connChan:      make(chan net.Conn, 1024),
+		connChan:      make(chan net.Conn, workers*4),  // Буфер для пиков нагрузки
 	}
 }
 
@@ -231,11 +231,15 @@ var connChan = make(chan net.Conn, 1024) // deprecated
 
 // activeConnsGlobal объявлен в adapter.go
 
+// worker обрабатывает соединения из канала
+//go:noinline
 func (s *Server) worker(connChan <-chan net.Conn) {
 	defer s.wg.Done()
 
 	for conn := range connChan {
-		s.handleConnection(conn)
+		// Каждое соединение обрабатывается в отдельной горутине
+		// Это позволяет обрабатывать множество соединений конкурентно
+		go s.handleConnection(conn)
 	}
 }
 
@@ -252,7 +256,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		atomic.AddInt32(&activeConnsGlobal, -1)
 	}()
 
-	// Настраиваем таймауты - используем кэшированное время
+	// Настраиваем таймауты
 	conn.SetReadDeadline(time.Now().Add(s.idleTimeout))
 
 	// Получаем буфер из пула (64KB)
@@ -262,8 +266,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 	buf := *bufPtr
 	bufLen := 0
 
-	keepAliveCount := int32(0)
+	// Первый запрос обрабатываем в этой горутине
+	if !s.handleRequest(conn, buf, &bufLen) {
+		conn.Close()
+		return
+	}
 
+	// Keep-alive запросы обрабатываем в новых горутинах для лучшей конкурентности
+	keepAliveCount := int32(1)
 	for {
 		if atomic.LoadInt32(&s.stopped) == 1 {
 			break
@@ -274,60 +284,33 @@ func (s *Server) handleConnection(conn net.Conn) {
 			break
 		}
 
-		// Получаем контекст из пула
-		ctx := contextPool.Get().(*Context)
-
-		// Инициализируем контекст - inline версия
-		ctx.Request.Method = ctx.Request.Method[:0]
-		ctx.Request.Path = ctx.Request.Path[:0]
-		ctx.Request.QueryString = ctx.Request.QueryString[:0]
-		ctx.Request.Body = ctx.Request.Body[:0]
-		ctx.Request.ContentLen = 0
-		ctx.Request.RemoteAddr = conn.RemoteAddr().String()
-		ctx.Request.conn = conn
-		ctx.Request.keepAlive = true
-		for k := range ctx.Request.Headers {
-			delete(ctx.Request.Headers, k)
-		}
-		ctx.Response.Status = 200
-		ctx.Response.StatusText = "OK"
-		ctx.Response.Body = ctx.Response.Body[:0]
-		for k := range ctx.Response.Headers {
-			delete(ctx.Response.Headers, k)
-		}
-
-		// Читаем и парсим запрос напрямую из буфера
+		// Читаем следующий запрос
 		n, err := conn.Read(buf)
 		if err != nil {
-			contextPool.Put(ctx)
 			break
 		}
 		bufLen = n
 
-		// Парсим запрос
-		_, err = s.parseRequestFast(buf[:bufLen], &ctx.Request)
-		if err != nil {
-			s.writeBadRequest(conn)
+		// Обработка в отдельной горутине для конкурентности
+		go func(reqNum int32) {
+			ctx := contextPool.Get().(*Context)
+			s.initContextInline(ctx, conn)
+
+			// Парсим запрос
+			_, err = s.parseRequestFast(buf[:bufLen], &ctx.Request)
+			if err != nil {
+				s.writeBadRequest(conn)
+				contextPool.Put(ctx)
+				return
+			}
+
+			// Вызываем обработчик
+			s.handler(ctx)
+
+			// Отправляем ответ
+			s.writeResponseFast(conn, &ctx.Response)
 			contextPool.Put(ctx)
-			break
-		}
-
-		// Вызываем обработчик
-		s.handler(ctx)
-
-		// Отправляем ответ
-		if err := s.writeResponseFast(conn, &ctx.Response); err != nil {
-			contextPool.Put(ctx)
-			break
-		}
-
-		// Возвращаем в пул
-		contextPool.Put(ctx)
-
-		// Проверка keep-alive
-		if !ctx.Request.keepAlive {
-			break
-		}
+		}(keepAliveCount)
 
 		keepAliveCount++
 		conn.SetReadDeadline(time.Now().Add(s.idleTimeout))
@@ -360,6 +343,59 @@ func (s *Server) initContext(ctx *Context, conn net.Conn) {
 	for k := range ctx.Response.Headers {
 		delete(ctx.Response.Headers, k)
 	}
+}
+
+// initContextInline инициализирует контекст - inline версия для скорости
+//go:nosplit
+func (s *Server) initContextInline(ctx *Context, conn net.Conn) {
+	ctx.Request.Method = ctx.Request.Method[:0]
+	ctx.Request.Path = ctx.Request.Path[:0]
+	ctx.Request.QueryString = ctx.Request.QueryString[:0]
+	ctx.Request.Body = ctx.Request.Body[:0]
+	ctx.Request.ContentLen = 0
+	ctx.Request.RemoteAddr = conn.RemoteAddr().String()
+	ctx.Request.conn = conn
+	ctx.Request.keepAlive = true
+	for k := range ctx.Request.Headers {
+		delete(ctx.Request.Headers, k)
+	}
+	ctx.Response.Status = 200
+	ctx.Response.StatusText = "OK"
+	ctx.Response.Body = ctx.Response.Body[:0]
+	for k := range ctx.Response.Headers {
+		delete(ctx.Response.Headers, k)
+	}
+}
+
+// handleRequest обрабатывает один запрос
+//go:noinline
+func (s *Server) handleRequest(conn net.Conn, buf []byte, bufLen *int) bool {
+	ctx := contextPool.Get().(*Context)
+	s.initContextInline(ctx, conn)
+
+	n, err := conn.Read(buf)
+	if err != nil {
+		contextPool.Put(ctx)
+		return false
+	}
+	*bufLen = n
+
+	_, err = s.parseRequestFast(buf[:*bufLen], &ctx.Request)
+	if err != nil {
+		s.writeBadRequest(conn)
+		contextPool.Put(ctx)
+		return false
+	}
+
+	s.handler(ctx)
+
+	if err := s.writeResponseFast(conn, &ctx.Response); err != nil {
+		contextPool.Put(ctx)
+		return false
+	}
+
+	contextPool.Put(ctx)
+	return ctx.Request.keepAlive
 }
 
 // === БЫСТРЫЙ ПАРСИНГ (без bufio) ===
