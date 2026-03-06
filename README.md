@@ -176,12 +176,42 @@ a.Use(azure.Logger())
 // Recovery от паник
 a.Use(azure.Recovery())
 
+// Metrics (сбор метрик Prometheus)
+azure.UseMetrics(a)
+
 // Свой middleware
 a.Use(func(c *azure.Context, next ultrahttp.RouteHandler) {
 	// Логика до
 	next(c.ultra)
 	// Логика после
 })
+```
+
+### Метрики
+
+Для включения сбора метрик добавь:
+
+```go
+a := azure.Defoult
+azure.UseMetrics(a)  // Включает сбор метрик
+
+// Метрики доступны по /metrics
+a.Run(":8080")
+```
+
+**Пример вывода метрик:**
+
+```bash
+curl http://localhost:8080/metrics
+```
+
+**Программный доступ к метрикам:**
+
+```go
+stats := azure.GetMetrics()
+fmt.Printf("Requests: %d\n", stats["requests"])
+fmt.Printf("Errors: %d\n", stats["errors"])
+fmt.Printf("Avg duration: %.2f ms\n", stats["avg_duration_ms"])
 ```
 
 ### Группы маршрутов
