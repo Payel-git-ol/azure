@@ -40,18 +40,18 @@ const (
 
 // HTTP статусы - быстрые константы
 const (
-	StatusOK           = 200
-	StatusCreated      = 201
-	StatusNoContent    = 204
-	StatusBadRequest   = 400
-	StatusUnauthorized = 401
-	StatusNotFound     = 404
-	StatusMethodNotAllowed = 405
-	StatusConflict     = 409
-	StatusTooManyRequests = 429
+	StatusOK                  = 200
+	StatusCreated             = 201
+	StatusNoContent           = 204
+	StatusBadRequest          = 400
+	StatusUnauthorized        = 401
+	StatusNotFound            = 404
+	StatusMethodNotAllowed    = 405
+	StatusConflict            = 409
+	StatusTooManyRequests     = 429
 	StatusInternalServerError = 500
-	StatusBadGateway   = 502
-	StatusServiceUnavailable = 503
+	StatusBadGateway          = 502
+	StatusServiceUnavailable  = 503
 )
 
 // Предзаполненные шаблоны ответов
@@ -170,7 +170,7 @@ var (
 //
 //go:noinline
 func NewServer(addr string, handler Handler) *Server {
-	workers := runtime.GOMAXPROCS(0) * 2  // 2x ядра для лучшей конкурентности
+	workers := runtime.GOMAXPROCS(0) * 2 // 2x ядра для лучшей конкурентности
 	if workers < 8 {
 		workers = 8
 	} else if workers > 64 {
@@ -185,7 +185,7 @@ func NewServer(addr string, handler Handler) *Server {
 		writeTimeout:  DefaultWriteTimeout,
 		idleTimeout:   DefaultIdleTimeout,
 		maxKeepAlives: DefaultMaxKeepAlives,
-		connChan:      make(chan net.Conn, workers*4),  // Буфер для пиков нагрузки
+		connChan:      make(chan net.Conn, workers*4), // Буфер для пиков нагрузки
 	}
 }
 
@@ -232,6 +232,7 @@ var connChan = make(chan net.Conn, 1024) // deprecated
 // activeConnsGlobal объявлен в adapter.go
 
 // worker обрабатывает соединения из канала
+//
 //go:noinline
 func (s *Server) worker(connChan <-chan net.Conn) {
 	defer s.wg.Done()
@@ -346,6 +347,7 @@ func (s *Server) initContext(ctx *Context, conn net.Conn) {
 }
 
 // initContextInline инициализирует контекст - inline версия для скорости
+//
 //go:nosplit
 func (s *Server) initContextInline(ctx *Context, conn net.Conn) {
 	ctx.Request.Method = ctx.Request.Method[:0]
@@ -368,6 +370,7 @@ func (s *Server) initContextInline(ctx *Context, conn net.Conn) {
 }
 
 // handleRequest обрабатывает один запрос
+//
 //go:noinline
 func (s *Server) handleRequest(conn net.Conn, buf []byte, bufLen *int) bool {
 	ctx := contextPool.Get().(*Context)
@@ -854,6 +857,11 @@ func (c *Context) GetBody() []byte {
 // GetRemoteAddr возвращает адрес клиента
 func (c *Context) GetRemoteAddr() string {
 	return c.Request.RemoteAddr
+}
+
+// GetConn возвращает net.Conn для прямого доступа
+func (c *Context) GetConn() net.Conn {
+	return c.Request.conn
 }
 
 // === СТАТИЧЕСКИЕ МЕТОДЫ ДЛЯ БЫСТРОГО ДОСТУПА ===

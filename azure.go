@@ -36,6 +36,16 @@ func (a *Azure) Use(mw Middleware) {
 	a.middleware = append(a.middleware, mw)
 }
 
+// MapUsings тип для множественного добавления middleware
+type MapUsings []func() Middleware
+
+// Usings добавляет несколько middleware сразу
+func (a *Azure) Usings(mws MapUsings) {
+	for _, mw := range mws {
+		a.middleware = append(a.middleware, mw())
+	}
+}
+
 // Get регистрирует GET маршрут
 func (a *Azure) Get(path string, handler func(c *Context)) {
 	a.router.GET(path, a.wrapHandler(handler))
@@ -107,7 +117,7 @@ func Logger() Middleware {
 	return func(c *Context, next ultrahttp.RouteHandler) {
 		// Логируем запрос
 		log.Printf("[%s] %s %s", c.ultra.GetMethod(), c.ultra.GetPath(), c.ultra.GetRemoteAddr())
-		
+
 		// Вызываем следующий хендлер
 		next(c.ultra)
 	}

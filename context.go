@@ -78,3 +78,8 @@ func (c *Context) GetQueryParam(key string) string {
 func (c *Context) BindJSON(v interface{}) error {
 	return c.ultra.BindJSON(v)
 }
+
+// GetUltra возвращает внутренний ultrahttp.Context для прямого доступа
+func (c *Context) GetUltra() *ultrahttp.Context {
+	return c.ultra
+}

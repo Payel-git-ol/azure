@@ -21,6 +21,25 @@ func ParseJSON(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
+// FastMarshalJSON - быстрая сериализация JSON (экспортированная версия)
+//
+//go:noinline
+func FastMarshalJSON(v interface{}) []byte {
+	return fastMarshalJSON(v)
+}
+
+// FastMarshalM - быстрая сериализация map[string]interface{} (экспортированная версия)
+//
+//go:noinline
+func FastMarshalM(m M) []byte {
+	return fastMarshalM(m)
+}
+
+// MarshalJSON - алиас для FastMarshalJSON
+func MarshalJSON(v interface{}) ([]byte, error) {
+	return fastMarshalJSON(v), nil
+}
+
 // === БЫСТРЫЕ МЕТОДЫ ДЛЯ JSON (ОПТИМИЗИРОВАННЫЕ) ===
 
 // fastMarshalJSON - быстрая сериализация для простых типов
@@ -378,6 +397,8 @@ func (c *Context) GetCookie(name string) (string, bool) {
 }
 
 // BindJSON парсит JSON из тела запроса в структуру
+//
+//go:noinl
 //go:noinline
 func (c *Context) BindJSON(v interface{}) error {
 	body := c.Request.Body
