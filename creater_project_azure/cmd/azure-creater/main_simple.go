@@ -68,6 +68,7 @@ type ModelConfig struct {
 type FunctionConfig struct {
 	Parameters map[string]string `yaml:"parameters"`
 	Model      string            `yaml:"model"`
+	Code       interface{}       `yaml:"code"` // Пользовательский код
 }
 
 func main() {
@@ -236,11 +237,52 @@ type User struct {
 
 						if funcConfig.Model != "" {
 							serviceContent.WriteString(") (*User, error) {\n")
-							serviceContent.WriteString("\t// TODO: Implement logic\n")
+
+							// Пользовательский код из YAML (code поле)
+							if funcConfig.Code != nil {
+								if codeStr, ok := funcConfig.Code.(string); ok && codeStr != "" {
+									lines := strings.Split(codeStr, ";")
+									for _, line := range lines {
+										line = strings.TrimSpace(line)
+										if line != "" {
+											serviceContent.WriteString(fmt.Sprintf("\t%s\n", line))
+										}
+									}
+								} else if codeLines, ok := funcConfig.Code.([]interface{}); ok {
+									for _, line := range codeLines {
+										if lineStr, ok := line.(string); ok && lineStr != "" {
+											serviceContent.WriteString(fmt.Sprintf("\t%s\n", lineStr))
+										}
+									}
+								}
+							} else {
+								serviceContent.WriteString("\t// TODO: Implement logic\n")
+							}
+
 							serviceContent.WriteString("\treturn nil, nil\n")
 						} else {
 							serviceContent.WriteString(") {\n")
-							serviceContent.WriteString("\t// TODO: Implement logic\n")
+
+							// Пользовательский код из YAML (code поле)
+							if funcConfig.Code != nil {
+								if codeStr, ok := funcConfig.Code.(string); ok && codeStr != "" {
+									lines := strings.Split(codeStr, ";")
+									for _, line := range lines {
+										line = strings.TrimSpace(line)
+										if line != "" {
+											serviceContent.WriteString(fmt.Sprintf("\t%s\n", line))
+										}
+									}
+								} else if codeLines, ok := funcConfig.Code.([]interface{}); ok {
+									for _, line := range codeLines {
+										if lineStr, ok := line.(string); ok && lineStr != "" {
+											serviceContent.WriteString(fmt.Sprintf("\t%s\n", lineStr))
+										}
+									}
+								}
+							} else {
+								serviceContent.WriteString("\t// TODO: Implement logic\n")
+							}
 						}
 						serviceContent.WriteString("}\n\n")
 					}
@@ -412,22 +454,48 @@ func generateMapHandler(sb *strings.Builder, path string, handler map[string]int
 		}
 	}
 
-	// operations placeholder
-	sb.WriteString("\t\t// operations\n")
-	sb.WriteString("\t\t// TODO: Implement your logic here\n\n")
+	// operations placeholder (если есть operations)
+	if _, hasOps := handler["operations"]; hasOps {
+		sb.WriteString("\t\t// operations\n")
+		sb.WriteString("\t\t// TODO: Implement your logic here\n\n")
+	}
 
-	// Результат
-	sb.WriteString("\t\tc.Json(azure.M{")
+	// Пользовательский код из YAML (code поле)
+	if code, ok := handler["code"]; ok {
+		if codeStr, ok := code.(string); ok && codeStr != "" {
+			// Может быть несколько строк кода через ;
+			lines := strings.Split(codeStr, ";")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line != "" {
+					sb.WriteString(fmt.Sprintf("\t\t%s\n", line))
+				}
+			}
+			sb.WriteString("\n")
+		} else if codeLines, ok := code.([]interface{}); ok {
+			// Или список строк
+			for _, line := range codeLines {
+				if lineStr, ok := line.(string); ok && lineStr != "" {
+					sb.WriteString(fmt.Sprintf("\t\t%s\n", lineStr))
+				}
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Результат (если есть)
 	if result, ok := handler["result"].(map[string]interface{}); ok {
 		if json, ok := result["json"].(map[string]interface{}); ok {
+			sb.WriteString("\t\tc.Json(azure.M{")
 			parts := make([]string, 0)
 			for k, v := range json {
 				parts = append(parts, fmt.Sprintf("\"%s\": \"%v\"", k, v))
 			}
 			sb.WriteString(strings.Join(parts, ", "))
+			sb.WriteString("})\n")
 		}
 	}
-	sb.WriteString("})\n")
+
 	sb.WriteString("\t})\n")
 }
 
