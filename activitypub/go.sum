@@ -1,0 +1,4 @@
+github.com/Payel-git-ol/azure v1.1.0 h1:q3rR9QkYgoYWLzSaqaxjoVyPO0oaK8vQQihkMYx6doQ=
+github.com/Payel-git-ol/azure v1.1.0/go.mod h1:aJO31AyiGjhhA4FvBLgwlOXzYjfLtglnPj+saWFcULk=
+github.com/Payel-git-ol/azure/azurewebsockets v0.0.0-20260310164558-de30e7fc408d h1:ERApyd6Um+JMPRClTC9yMym9yHsgBsVS5mdfIaB2XHI=
+github.com/Payel-git-ol/azure/azurewebsockets v0.0.0-20260310164558-de30e7fc408d/go.mod h1:Kk4cDhHI96YzRSX/pH3wyjKWh926H0fqvQKS0k+Vjps=

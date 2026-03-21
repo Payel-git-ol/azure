@@ -3,10 +3,14 @@
 package ultrahttp
 
 import (
+	"context"
 	"net"
+	"os"
+	"os/signal"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 )
@@ -100,6 +104,9 @@ type Request struct {
 	conn        net.Conn
 	keepAlive   bool
 	Headers     map[string]string
+	params      *RouteParams
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 // Response - оптимизированный HTTP ответ
@@ -128,6 +135,7 @@ type Server struct {
 	stopped       int32
 	wg            sync.WaitGroup
 	connChan      chan net.Conn // Локальный канал для соединений
+	shutdownChan  chan struct{} // Канал для shutdown
 }
 
 // Context объединяет Request и Response
@@ -144,6 +152,7 @@ var (
 			return &Context{
 				Request: Request{
 					Headers: make(map[string]string, 8),
+					params:  &RouteParams{Keys: make([]string, 0, 4), Values: make([]string, 0, 4)},
 				},
 				Response: Response{
 					Status:     200,
@@ -186,6 +195,7 @@ func NewServer(addr string, handler Handler) *Server {
 		idleTimeout:   DefaultIdleTimeout,
 		maxKeepAlives: DefaultMaxKeepAlives,
 		connChan:      make(chan net.Conn, workers*4), // Буфер для пиков нагрузки
+		shutdownChan:  make(chan struct{}),
 	}
 }
 
@@ -301,6 +311,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 			_, err = s.parseRequestFast(buf[:bufLen], &ctx.Request)
 			if err != nil {
 				s.writeBadRequest(conn)
+				if ctx.Request.cancel != nil {
+					ctx.Request.cancel()
+				}
 				contextPool.Put(ctx)
 				return
 			}
@@ -310,6 +323,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 			// Отправляем ответ
 			s.writeResponseFast(conn, &ctx.Response)
+			if ctx.Request.cancel != nil {
+				ctx.Request.cancel()
+			}
 			contextPool.Put(ctx)
 		}(keepAliveCount)
 
@@ -336,6 +352,13 @@ func (s *Server) initContext(ctx *Context, conn net.Conn) {
 	for k := range ctx.Request.Headers {
 		delete(ctx.Request.Headers, k)
 	}
+	// Сбрасываем параметры
+	if ctx.Request.params != nil {
+		ctx.Request.params.Keys = ctx.Request.params.Keys[:0]
+		ctx.Request.params.Values = ctx.Request.params.Values[:0]
+	}
+	// Создаём context с отменой
+	ctx.Request.ctx, ctx.Request.cancel = context.WithCancel(context.Background())
 
 	// Response
 	ctx.Response.Status = 200
@@ -361,6 +384,13 @@ func (s *Server) initContextInline(ctx *Context, conn net.Conn) {
 	for k := range ctx.Request.Headers {
 		delete(ctx.Request.Headers, k)
 	}
+	// Сбрасываем параметры
+	if ctx.Request.params != nil {
+		ctx.Request.params.Keys = ctx.Request.params.Keys[:0]
+		ctx.Request.params.Values = ctx.Request.params.Values[:0]
+	}
+	// Создаём context с отменой
+	ctx.Request.ctx, ctx.Request.cancel = context.WithCancel(context.Background())
 	ctx.Response.Status = 200
 	ctx.Response.StatusText = "OK"
 	ctx.Response.Body = ctx.Response.Body[:0]
@@ -378,25 +408,41 @@ func (s *Server) handleRequest(conn net.Conn, buf []byte, bufLen *int) bool {
 
 	n, err := conn.Read(buf)
 	if err != nil {
+		if ctx.Request.cancel != nil {
+			ctx.Request.cancel()
+		}
 		contextPool.Put(ctx)
 		return false
 	}
 	*bufLen = n
 
+	println("DEBUG handleRequest: read", n, "bytes")
+
 	_, err = s.parseRequestFast(buf[:*bufLen], &ctx.Request)
 	if err != nil {
+		println("DEBUG handleRequest: parse error", err)
 		s.writeBadRequest(conn)
+		if ctx.Request.cancel != nil {
+			ctx.Request.cancel()
+		}
 		contextPool.Put(ctx)
 		return false
 	}
 
+	println("DEBUG handleRequest: calling handler for", string(ctx.Request.Method), string(ctx.Request.Path))
 	s.handler(ctx)
 
 	if err := s.writeResponseFast(conn, &ctx.Response); err != nil {
+		if ctx.Request.cancel != nil {
+			ctx.Request.cancel()
+		}
 		contextPool.Put(ctx)
 		return false
 	}
 
+	if ctx.Request.cancel != nil {
+		ctx.Request.cancel()
+	}
 	contextPool.Put(ctx)
 	return ctx.Request.keepAlive
 }
@@ -864,9 +910,73 @@ func (c *Context) GetConn() net.Conn {
 	return c.Request.conn
 }
 
+// GetParams возвращает параметры пути
+func (c *Context) GetParams() *RouteParams {
+	return c.Request.params
+}
+
+// SetParams устанавливает параметры пути
+func (c *Context) SetParams(params *RouteParams) {
+	c.Request.params = params
+}
+
 // === СТАТИЧЕСКИЕ МЕТОДЫ ДЛЯ БЫСТРОГО ДОСТУПА ===
 
 // Status200OK - готовый ответ 200
 var Status200OK = []byte("200 OK")
 var Status404NotFound = []byte("404 Not Found")
 var Status500InternalError = []byte("500 Internal Server Error")
+
+// === GRACEFUL SHUTDOWN ===
+
+// Shutdown выполняет плавную остановку сервера
+func (s *Server) Shutdown(ctx context.Context) error {
+	// Устанавливаем флаг остановки
+	atomic.StoreInt32(&s.stopped, 1)
+
+	// Закрываем listener
+	if s.ln != nil {
+		s.ln.Close()
+	}
+
+	// Закрываем канал соединений
+	close(s.shutdownChan)
+
+	// Ждём завершения всех воркеров или таймаут
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ListenAndServeGracefully запускает сервер с graceful shutdown по сигналам
+func (s *Server) ListenAndServeGracefully() error {
+	// Канал для сигналов
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Запускаем сервер в горутине
+	go func() {
+		if err := s.ListenAndServe(); err != nil && err != net.ErrClosed {
+			println("[ultrahttp] Server error:", err.Error())
+		}
+	}()
+
+	// Ждём сигнал завершения
+	<-quit
+	println("[ultrahttp] Shutting down server...")
+
+	// Даём 30 секунд на завершение
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	return s.Shutdown(ctx)
+}

@@ -1,8 +1,10 @@
 package azure
 
 import (
-	"github.com/Payel-git-ol/azure/ultrahttp"
 	"log"
+	"runtime/debug"
+
+	"github.com/Payel-git-ol/azure/ultrahttp"
 )
 
 // Azure - фреймворк на ultrahttp движке
@@ -15,11 +17,17 @@ type Azure struct {
 // Middleware функция промежуточного обработчика
 type Middleware func(c *Context, next ultrahttp.RouteHandler)
 
-// Defoult экземпляр по умолчанию (сохраняем твою орфографию :)
-var Defoult *Azure
+// Default экземпляр по умолчанию
+var Default *Azure
+
+// Defoult устаревшее имя, используйте Default
+//
+// Deprecated: Use Default instead
+var Defoult = Default
 
 func init() {
-	Defoult = New()
+	Default = New()
+	Defoult = Default
 }
 
 // New создаёт новый экземпляр Azure
@@ -76,9 +84,9 @@ func (a *Azure) wrapHandler(handler func(c *Context)) ultrahttp.RouteHandler {
 	return func(c *ultrahttp.Context) {
 		ctx := &Context{ultra: c}
 
-		// Применяем middleware в обратном порядке
+		// Применяем middleware в прямом порядке (как в Gin/Fiber)
 		chain := func() { handler(ctx) }
-		for i := len(a.middleware) - 1; i >= 0; i-- {
+		for i := 0; i < len(a.middleware); i++ {
 			mw := a.middleware[i]
 			next := chain
 			chain = func() {
@@ -102,6 +110,20 @@ func (a *Azure) Run(addr string) error {
 
 	server := ultrahttp.NewServer(addr, a.router.Handle)
 	return server.ListenAndServe()
+}
+
+// RunGracefully запускает сервер с graceful shutdown
+func (a *Azure) RunGracefully(addr string) error {
+	if len(addr) > 0 && addr[0] != ':' {
+		addr = ":" + addr
+	}
+
+	log.Printf("[%s] Server starting on port %s", a.name, addr[1:])
+	log.Printf("[%s] Using ultrahttp engine - ZERO allocations!", a.name)
+	log.Printf("[%s] Graceful shutdown enabled (Ctrl+C to stop)", a.name)
+
+	server := ultrahttp.NewServer(addr, a.router.Handle)
+	return server.ListenAndServeGracefully()
 }
 
 // Group создаёт группу маршрутов с префиксом
@@ -128,7 +150,8 @@ func Recovery() Middleware {
 	return func(c *Context, next ultrahttp.RouteHandler) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[Recovery] panic recovered: %v", err)
+				// Логируем ошибку и полный стек трейс
+				log.Printf("[Recovery] panic recovered: %v\n%s", err, debug.Stack())
 				c.ultra.SetStatus(500, "Internal Server Error")
 				c.ultra.SetJSON(M{
 					"error": "Internal Server Error",

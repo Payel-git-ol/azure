@@ -28,6 +28,9 @@ type routeNode struct {
 	children    []*routeNode
 	childrenMap map[string]*routeNode // Быстрый поиск за O(1)
 	priority    uint32
+	paramChild  *routeNode // Дочерний узел для параметров (:id)
+	paramName   string     // Имя параметра для этого узла
+	isParam     bool       // Флаг параметрического узла
 }
 
 // UltraRouter быстрый роутер для ultrahttp
@@ -39,6 +42,38 @@ type UltraRouter struct {
 	methodMap sync.Map // Кэш для быстрого определения типа метода
 }
 
+// RouteParams параметры пути
+type RouteParams struct {
+	Keys   []string
+	Values []string
+}
+
+// NewRouteParams создаёт новый экземпляр RouteParams
+func NewRouteParams() *RouteParams {
+	return &RouteParams{
+		Keys:   make([]string, 0, 4),
+		Values: make([]string, 0, 4),
+	}
+}
+
+// GetParam получает параметр по имени
+func (rp *RouteParams) GetParam(name string) string {
+	for i, key := range rp.Keys {
+		if key == name {
+			if i < len(rp.Values) {
+				return rp.Values[i]
+			}
+		}
+	}
+	return ""
+}
+
+// Reset сбрасывает параметры для переиспользования
+func (rp *RouteParams) Reset() {
+	rp.Keys = rp.Keys[:0]
+	rp.Values = rp.Values[:0]
+}
+
 // newRouteNode создаёт новый узел
 func newRouteNode(path string) *routeNode {
 	return &routeNode{
@@ -46,6 +81,9 @@ func newRouteNode(path string) *routeNode {
 		children:    make([]*routeNode, 0, 4),
 		childrenMap: make(map[string]*routeNode),
 		priority:    0,
+		paramChild:  nil,
+		paramName:   "",
+		isParam:     false,
 	}
 }
 
@@ -64,7 +102,7 @@ func NewUltraRouter() *UltraRouter {
 	}
 }
 
-// insert вставляет маршрут в дерево
+// insert вставляет маршрут в дерево с поддержкой параметров
 func insert(root *routeNode, path string, handler RouteHandler) {
 	if path == "/" {
 		root.handler = handler
@@ -79,17 +117,30 @@ func insert(root *routeNode, path string, handler RouteHandler) {
 			continue
 		}
 
-		// Ищем в map для O(1) поиска
-		child, found := current.childrenMap[segment]
-		if found {
-			child.priority++
-			current = child
+		// Проверяем, является ли сегмент параметром (:id)
+		if len(segment) > 0 && segment[0] == ':' {
+			paramName := segment[1:] // убираем ':'
+
+			if current.paramChild == nil {
+				current.paramChild = newRouteNode("*")
+				current.paramChild.isParam = true
+				current.paramChild.paramName = paramName
+			}
+			current = current.paramChild
+			current.paramName = paramName
 		} else {
-			// Создаём новый узел если не найден
-			newNode := newRouteNode(segment)
-			newNode.priority = 1
-			current.childrenMap[segment] = newNode
-			current = newNode
+			// Ищем в map для O(1) поиска
+			child, found := current.childrenMap[segment]
+			if found {
+				child.priority++
+				current = child
+			} else {
+				// Создаём новый узел если не найден
+				newNode := newRouteNode(segment)
+				newNode.priority = 1
+				current.childrenMap[segment] = newNode
+				current = newNode
+			}
 		}
 	}
 
@@ -124,10 +175,10 @@ func splitPath(path string) []string {
 	return result
 }
 
-// find ищет обработчик в дереве
+// find ищет обработчик в дереве с поддержкой параметров
 //
 //go:noinline
-func find(root *routeNode, path []byte) RouteHandler {
+func find(root *routeNode, path []byte, params *RouteParams) RouteHandler {
 	if len(path) == 0 || path[0] != '/' {
 		return nil
 	}
@@ -145,16 +196,24 @@ func find(root *routeNode, path []byte) RouteHandler {
 			end++
 		}
 
-		// Конвертируем segment в string для lookup в map (одноразово)
-		// но это быстрее чем линейный поиск через массив
 		segment := b2s(path[start:end])
 
+		// Сначала ищем точное совпадение
 		child, found := current.childrenMap[segment]
-		if !found {
+		if found {
+			current = child
+		} else if current.paramChild != nil {
+			// Если точного совпадения нет, используем параметрический узел
+			current = current.paramChild
+			// Сохраняем параметр
+			if current.paramName != "" {
+				params.Keys = append(params.Keys, current.paramName)
+				params.Values = append(params.Values, segment)
+			}
+		} else {
 			return nil
 		}
 
-		current = child
 		start = end + 1
 	}
 
@@ -239,6 +298,7 @@ func bytesEqualConst(b []byte, s string) bool {
 func (r *UltraRouter) Handle(c *Context) {
 	// Быстрое определение типа метода
 	methodType := getMethodType(c.Request.Method)
+	println("DEBUG Router: method =", string(c.Request.Method), "path =", string(c.Request.Path))
 
 	if methodType == methodTypeUNKNOWN {
 		if r.notFound != nil {
@@ -252,9 +312,17 @@ func (r *UltraRouter) Handle(c *Context) {
 	// Получаем роутер для данного метода
 	root := r.routers[methodType]
 
+	// Инициализируем параметры
+	var params RouteParams
+	params.Keys = make([]string, 0, 4)
+	params.Values = make([]string, 0, 4)
+	c.Request.params = &params
+
 	// Быстрый path для root route (/)
 	if len(c.Request.Path) == 1 && c.Request.Path[0] == '/' {
+		println("DEBUG Router: matching root")
 		if root.handler != nil {
+			println("DEBUG Router: root handler found")
 			root.handler(c)
 			return
 		}
@@ -268,7 +336,7 @@ func (r *UltraRouter) Handle(c *Context) {
 	}
 
 	// Ищем handler в дереве для других путей
-	handler := find(root, c.Request.Path)
+	handler := find(root, c.Request.Path, &params)
 
 	if handler != nil {
 		handler(c)

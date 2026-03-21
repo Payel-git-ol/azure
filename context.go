@@ -1,6 +1,10 @@
 package azure
 
-import "github.com/Payel-git-ol/azure/ultrahttp"
+import (
+	"context"
+
+	"github.com/Payel-git-ol/azure/ultrahttp"
+)
 
 // Context контекст запроса
 type Context struct {
@@ -40,8 +44,7 @@ func (c *Context) SetStatus(code int, text string) {
 
 // Param получает параметр пути
 func (c *Context) Param(key string) string {
-	// TODO: реализовать когда будет поддержка параметров в роутере
-	return ""
+	return c.ultra.GetParam(key)
 }
 
 // GetBody получает тело запроса
@@ -82,4 +85,9 @@ func (c *Context) BindJSON(v interface{}) error {
 // GetUltra возвращает внутренний ultrahttp.Context для прямого доступа
 func (c *Context) GetUltra() *ultrahttp.Context {
 	return c.ultra
+}
+
+// Context возвращает context.Context для отмены операций
+func (c *Context) Context() context.Context {
+	return c.ultra.Context()
 }

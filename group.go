@@ -49,9 +49,14 @@ func (g *Group) wrapHandler(handler func(c *Context)) ultrahttp.RouteHandler {
 	return func(c *ultrahttp.Context) {
 		ctx := &Context{ultra: c}
 
+		// Сначала middleware группы, затем глобальные (прямой порядок)
+		allMiddleware := make([]Middleware, 0, len(g.middleware)+len(g.azure.middleware))
+		allMiddleware = append(allMiddleware, g.middleware...)
+		allMiddleware = append(allMiddleware, g.azure.middleware...)
+
 		chain := func() { handler(ctx) }
-		for i := len(g.middleware) - 1; i >= 0; i-- {
-			mw := g.middleware[i]
+		for i := 0; i < len(allMiddleware); i++ {
+			mw := allMiddleware[i]
 			next := chain
 			chain = func() {
 				mw(ctx, func(c *ultrahttp.Context) {

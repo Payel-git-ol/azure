@@ -2,6 +2,7 @@ package ultrahttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -432,6 +433,14 @@ func (c *Context) GetQueryParam(key string) string {
 	return ""
 }
 
+// GetParam получает параметр пути по имени
+func (c *Context) GetParam(name string) string {
+	if c.Request.params == nil {
+		return ""
+	}
+	return c.Request.params.GetParam(name)
+}
+
 // === REDIRECT ===
 
 // Redirect делает редирект
@@ -591,4 +600,9 @@ func (c *Context) PathEquals(s string) bool {
 // MethodEquals сравнивает метод с строкой
 func (c *Context) MethodEquals(s string) bool {
 	return bytesEqual(c.Request.Method, []byte(s))
+}
+
+// Context возвращает context.Context для отмены операций
+func (c *Context) Context() context.Context {
+	return c.Request.ctx
 }
