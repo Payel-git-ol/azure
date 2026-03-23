@@ -9,8 +9,125 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// loadConfig загружает конфигурацию с поддержкой импортов
+func loadConfig(configPath string) (*ProjectConfig, error) {
+	// Читаем основной файл
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config: %w", err)
+	}
+
+	// Получаем директорию конфига для относительных путей
+	configDir := filepath.Dir(configPath)
+
+	// Парсим основную конфигурацию
+	var config ProjectConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Обрабатываем импорты
+	if len(config.Import) > 0 {
+		for i := range config.Import {
+			importFile := config.Import[i].File
+			if importFile == "" {
+				continue
+			}
+
+			// Путь к импортируемому файлу
+			importPath := filepath.Join(configDir, importFile)
+			importData, err := os.ReadFile(importPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read import %s: %w", importFile, err)
+			}
+
+			// Парсим импортированную конфигурацию
+			var importConfig ProjectConfig
+			if err := yaml.Unmarshal(importData, &importConfig); err != nil {
+				return nil, fmt.Errorf("failed to parse import %s: %w", importFile, err)
+			}
+
+			// Сливаем экспортированные данные
+			if importConfig.Export != nil {
+				// Сливаем project
+				if importConfig.Export.Project != nil {
+					mergeProjectStructure(&config, importConfig.Export.Project)
+				}
+
+				// Сливаем services с учетом appeal
+				for svcName, svcConfig := range importConfig.Export.Services {
+					targetName := svcName
+					if config.Import[i].Appeal != "" {
+						targetName = config.Import[i].Appeal
+					}
+					config.Services[targetName] = svcConfig
+				}
+			}
+		}
+	}
+
+	return &config, nil
+}
+
+// mergeProjectStructure сливает ProjectStructure
+func mergeProjectStructure(config *ProjectConfig, exported *ProjectStructure) {
+	if exported == nil || config.Project == nil {
+		return
+	}
+
+	if config.Project.Internal == nil {
+		config.Project.Internal = &InternalStructure{}
+	}
+
+	if exported.Internal == nil {
+		return
+	}
+
+	// Сливаем core
+	if exported.Internal.Core != nil {
+		if config.Project.Internal.Core == nil {
+			config.Project.Internal.Core = &CoreStructure{}
+		}
+		config.Project.Internal.Core.Services = append(
+			config.Project.Internal.Core.Services,
+			exported.Internal.Core.Services...,
+		)
+	}
+
+	// Сливаем fetcher
+	config.Project.Internal.Fetcher = append(
+		config.Project.Internal.Fetcher,
+		exported.Internal.Fetcher...,
+	)
+
+	// Сливаем pkg
+	if exported.Internal.Pkg != nil {
+		if config.Project.Internal.Pkg == nil {
+			config.Project.Internal.Pkg = &PkgStructure{}
+		}
+		config.Project.Internal.Pkg.Database = append(
+			config.Project.Internal.Pkg.Database,
+			exported.Internal.Pkg.Database...,
+		)
+	}
+}
+
+// ImportConfig конфигурация импорта
+type ImportConfig struct {
+	File   string `yaml:"file"`   // Имя файла
+	Appeal string `yaml:"appeal"` // Алиас для импорта
+}
+
+// ExportConfig конфигурация экспорта
+type ExportConfig struct {
+	Project  *ProjectStructure         `yaml:"project,omitempty"`
+	Services map[string]*ServiceConfig `yaml:"services,omitempty"`
+}
+
 // ProjectConfig полная конфигурация проекта
 type ProjectConfig struct {
+	Import   []ImportConfig            `yaml:"import,omitempty"`
+	Export   *ExportConfig             `yaml:"export,omitempty"`
 	MainFile *MainFileConfig           `yaml:"main-file"`
 	Project  *ProjectStructure         `yaml:"project"`
 	Services map[string]*ServiceConfig `yaml:"services"`
@@ -31,6 +148,25 @@ type ProjectStructure struct {
 type InternalStructure struct {
 	Core    *CoreStructure `yaml:"core"`
 	Fetcher []string       `yaml:"fetcher"`
+	Pkg     *PkgStructure  `yaml:"pkg"`
+}
+
+// PkgStructure структура pkg
+type PkgStructure struct {
+	Database []string `yaml:"database"`
+}
+
+// DatabaseConfig конфигурация базы данных
+type DatabaseConfig struct {
+	ORM         string             `yaml:"orm"`
+	Driver      string             `yaml:"driver"`
+	DNS         interface{}        `yaml:"dns"`
+	AutoMigrate *AutoMigrateConfig `yaml:"auto-migrate"`
+}
+
+// AutoMigrateConfig конфигурация auto-migrate
+type AutoMigrateConfig struct {
+	Models []string `yaml:"model"`
 }
 
 // CoreStructure ядро проекта
@@ -40,10 +176,13 @@ type CoreStructure struct {
 
 // ServiceConfig конфигурация сервиса
 type ServiceConfig struct {
+	Type          string                     `yaml:"type"`
 	AzureUse      []string                   `yaml:"azure.use"`
-	AzureHandlers interface{}                `yaml:"azure.handlers"` // Может быть []string или map[string]*HandlerConfig
+	AzureHandlers interface{}                `yaml:"azure.handlers"`
 	Models        []ModelConfig              `yaml:"models"`
 	Functions     map[string]*FunctionConfig `yaml:"functions"`
+	Run           interface{}                `yaml:"run"`
+	Database      *DatabaseConfig            `yaml:"database"`
 }
 
 // HandlerConfig конфигурация хендлера (новый формат)
@@ -60,7 +199,15 @@ type ResultConfig struct {
 
 // ModelConfig конфигурация модели
 type ModelConfig struct {
-	Path string `yaml:"path"`
+	Path   string        `yaml:"path"`
+	Type   string        `yaml:"type"`   // model или request
+	Name   string        `yaml:"name"`   // Имя структуры
+	Fields []FieldConfig `yaml:"fields"` // Поля
+}
+
+// FieldConfig конфигурация поля
+type FieldConfig struct {
+	Name string `yaml:"name"`
 	Type string `yaml:"type"`
 }
 
@@ -80,16 +227,10 @@ func main() {
 
 	configPath := os.Args[1]
 
-	// Читаем YAML
-	data, err := os.ReadFile(configPath)
+	// Загружаем конфигурацию с поддержкой импортов
+	config, err := loadConfig(configPath)
 	if err != nil {
-		fmt.Printf("❌ Error reading config: %v\n", err)
-		os.Exit(1)
-	}
-
-	var config ProjectConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		fmt.Printf("❌ Error parsing config: %v\n", err)
+		fmt.Printf("❌ Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -145,6 +286,112 @@ func main() {
 				fmt.Printf("📄 Generated: internal/fetcher/%s\n", fetcherFile)
 			}
 		}
+
+		// Генерируем pkg/database
+		if config.Project.Internal.Pkg != nil && len(config.Project.Internal.Pkg.Database) > 0 {
+			dirs["pkg/database"] = true
+			dbDir := filepath.Join(rootDir, "pkg/database")
+			if err := os.MkdirAll(dbDir, 0755); err != nil {
+				fmt.Printf("❌ Error creating database directory: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Создаём database.go
+			dbPath := filepath.Join(dbDir, "database.go")
+
+			// Проверяем тип DNS
+			dnsVarName := "DATABASE_DNS"
+			useAzureEnv := false
+
+			if config.Services != nil {
+				if dbSvc, ok := config.Services["database"]; ok && dbSvc.Database != nil && dbSvc.Database.DNS != nil {
+					// Проверяем azure.env
+					if dnsMap, ok := dbSvc.Database.DNS.(map[string]interface{}); ok {
+						if azureEnv, ok := dnsMap["azure.env"]; ok {
+							if envName, ok := azureEnv.(string); ok {
+								dnsVarName = envName
+								useAzureEnv = true
+							}
+						} else if env, ok := dnsMap["env"]; ok {
+							// Простой env - используем os.Getenv
+							if envName, ok := env.(string); ok {
+								dnsVarName = envName
+								useAzureEnv = false
+							}
+						}
+					}
+				}
+			}
+
+			var dbContent string
+			if useAzureEnv {
+				dbContent = fmt.Sprintf(`package database
+
+import (
+	"log"
+
+	"github.com/Payel-git-ol/azure/env"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+var DB *gorm.DB
+
+// InitDB инициализирует базу данных и выполняет миграцию
+func InitDB(models ...interface{}) {
+	dsn := env.MustGet("%s", "")
+	var err error
+	
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("❌ Database error: %%v", err)
+	}
+
+	if err = DB.AutoMigrate(models...); err != nil {
+		log.Fatalf("❌ Migration error: %%v", err)
+	}
+	
+	log.Println("✅ Database initialized and migrated")
+}
+`, dnsVarName)
+			} else {
+				dbContent = `package database
+
+import (
+	"log"
+	"os"
+
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+var DB *gorm.DB
+
+// InitDB инициализирует базу данных и выполняет миграцию
+func InitDB(models ...interface{}) {
+	dsn := os.Getenv("DATABASE_DNS")
+	var err error
+	
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("❌ Database error: %v", err)
+	}
+
+	if err = DB.AutoMigrate(models...); err != nil {
+		log.Fatalf("❌ Migration error: %v", err)
+	}
+	
+	log.Println("✅ Database initialized and migrated")
+}
+`
+			}
+
+			if err := os.WriteFile(dbPath, []byte(dbContent), 0644); err != nil {
+				fmt.Printf("❌ Error creating database.go: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("📄 Generated: pkg/database/database.go\n")
+		}
 	}
 
 	// Добавляем модели из сервисов
@@ -169,7 +416,16 @@ func main() {
 
 	// Генерируем main.go
 	mainPath := filepath.Join(rootDir, "cmd/app/main.go")
-	mainContent := generateMain(&config)
+
+	// Проверяем есть ли database сервис
+	hasDatabase := false
+	if config.Services != nil {
+		if dbSvc, ok := config.Services["database"]; ok && dbSvc.Database != nil {
+			hasDatabase = true
+		}
+	}
+
+	mainContent := generateMain(config, hasDatabase)
 	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
 		fmt.Printf("❌ Error writing main.go: %v\n", err)
 		os.Exit(1)
@@ -178,122 +434,231 @@ func main() {
 
 	// Генерируем модели
 	if config.Services != nil {
-		if userSvc, ok := config.Services["user"]; ok {
-			for _, model := range userSvc.Models {
-				var modelContent string
-				if strings.Contains(model.Path, "requests") {
-					modelContent = `package requests
+		for svcName, svc := range config.Services {
+			for _, model := range svc.Models {
+				// Определяем имя пакета из пути
+				pkgName := getPackageName(model.Path)
 
-// ReqUser represents a user creation/update request
-type ReqUser struct {
-	Name  string ` + "`" + `json:"name" validate:"required"` + "`" + `
-	Email string ` + "`" + `json:"email" validate:"required,email"` + "`" + `
-	Age   int    ` + "`" + `json:"age" validate:"required,min=18"` + "`" + `
-}
-`
-				} else {
-					modelContent = `package models
-
-// User represents a user in the system
-type User struct {
-	ID       int    ` + "`" + `json:"id"` + "`" + `
-	Name     string ` + "`" + `json:"name"` + "`" + `
-	Email    string ` + "`" + `json:"email"` + "`" + `
-	Age      int    ` + "`" + `json:"age"` + "`" + `
-}
-`
+				// Определяем тип модели
+				modelType := model.Type
+				if modelType == "" {
+					modelType = "model" // по умолчанию
 				}
 
+				// Генерируем контент модели
+				var modelContent strings.Builder
+				modelContent.WriteString(fmt.Sprintf("package %s\n\n", pkgName))
+
+				// Имя структуры
+				structName := model.Name
+				if structName == "" {
+					// Берём из имени файла
+					structName = strings.TrimSuffix(filepath.Base(model.Path), ".go")
+					structName = strings.Title(structName)
+				}
+
+				modelContent.WriteString(fmt.Sprintf("// %s - generated %s\n", structName, modelType))
+				modelContent.WriteString(fmt.Sprintf("type %s struct {\n", structName))
+
+				// Генерируем поля
+				if len(model.Fields) > 0 {
+					for _, field := range model.Fields {
+						fieldName := strings.Title(field.Name)
+						fieldType := field.Type
+						if fieldType == "" {
+							fieldType = "string"
+						}
+
+						if modelType == "request" {
+							// Request с json тегами
+							modelContent.WriteString(fmt.Sprintf("\t%s %s `json:\"%s\"`\n", fieldName, fieldType, field.Name))
+						} else {
+							// Model без тегов (или с json тегами по умолчанию)
+							modelContent.WriteString(fmt.Sprintf("\t%s %s `json:\"%s\"`\n", fieldName, fieldType, field.Name))
+						}
+					}
+				} else {
+					// Пустая структура если нет полей
+					modelContent.WriteString("\t// TODO: Add fields\n")
+				}
+
+				modelContent.WriteString("}\n")
+
+				// Записываем файл
 				modelPath := filepath.Join(rootDir, model.Path)
-				if err := os.WriteFile(modelPath, []byte(modelContent), 0644); err != nil {
+				if err := os.WriteFile(modelPath, []byte(modelContent.String()), 0644); err != nil {
 					fmt.Printf("❌ Error writing model %s: %v\n", model.Path, err)
 					os.Exit(1)
 				}
 				fmt.Printf("📄 Generated: %s\n", model.Path)
+			}
+
+			// Не генерируем модели для svcName == "user" здесь, чтобы избежать дублирования
+			if svcName == "user" {
+				continue
 			}
 		}
 	}
 
 	// Генерируем сервисы
 	if config.Project != nil && config.Project.Internal != nil && config.Project.Internal.Core != nil {
-		for _, service := range config.Project.Internal.Core.Services {
-			servicePath := filepath.Join(rootDir, "internal/core/services", service)
+		// Генерируем сервисы для всех сервисов в config.Services
+		for svcName, svcConfig := range config.Services {
+			// Пропускаем main и database - они не сервисы
+			if svcName == "main" || svcName == "database" {
+				continue
+			}
+
+			// Имя файла сервиса
+			serviceFile := svcName + ".go"
+			servicePath := filepath.Join(rootDir, "internal/core/services", serviceFile)
 
 			var serviceContent strings.Builder
+
+			// Собираем импорты для моделей
+			imports := make(map[string]string) // pkg -> path
+			for _, model := range svcConfig.Models {
+				pkgName := getPackageName(model.Path)
+				importPath := getModelImportPath(model.Path)
+				imports[pkgName] = importPath
+			}
+
+			// Записываем package и импорты
 			serviceContent.WriteString("package services\n\n")
 
-			// Генерируем функции из user сервиса
-			if config.Services != nil {
-				if userSvc, ok := config.Services["user"]; ok {
-					for funcName, funcConfig := range userSvc.Functions {
-						serviceContent.WriteString(fmt.Sprintf("// %s - generated function\n", funcName))
-						serviceContent.WriteString(fmt.Sprintf("func %s(", funcName))
+			// Собираем все импорты
+			allImports := make(map[string]bool)
 
-						params := make([]string, 0)
-						for paramName, paramType := range funcConfig.Parameters {
-							params = append(params, fmt.Sprintf("%s %s", paramName, paramType))
+			// Добавляем импорты моделей
+			for _, model := range svcConfig.Models {
+				importPath := getModelImportPath(model.Path)
+				allImports[importPath] = true
+			}
+
+			// Проверяем code на наличие time.Time
+			for _, funcConfig := range svcConfig.Functions {
+				if funcConfig.Code != nil {
+					if codeStr, ok := funcConfig.Code.(string); ok {
+						if strings.Contains(codeStr, "time.") {
+							allImports["time"] = true
 						}
-						serviceContent.WriteString(strings.Join(params, ", "))
-
-						if funcConfig.Model != "" {
-							serviceContent.WriteString(") (*User, error) {\n")
-
-							// Пользовательский код из YAML (code поле)
-							if funcConfig.Code != nil {
-								if codeStr, ok := funcConfig.Code.(string); ok && codeStr != "" {
-									lines := strings.Split(codeStr, ";")
-									for _, line := range lines {
-										line = strings.TrimSpace(line)
-										if line != "" {
-											serviceContent.WriteString(fmt.Sprintf("\t%s\n", line))
-										}
-									}
-								} else if codeLines, ok := funcConfig.Code.([]interface{}); ok {
-									for _, line := range codeLines {
-										if lineStr, ok := line.(string); ok && lineStr != "" {
-											serviceContent.WriteString(fmt.Sprintf("\t%s\n", lineStr))
-										}
-									}
-								}
-							} else {
-								serviceContent.WriteString("\t// TODO: Implement logic\n")
-							}
-
-							serviceContent.WriteString("\treturn nil, nil\n")
-						} else {
-							serviceContent.WriteString(") {\n")
-
-							// Пользовательский код из YAML (code поле)
-							if funcConfig.Code != nil {
-								if codeStr, ok := funcConfig.Code.(string); ok && codeStr != "" {
-									lines := strings.Split(codeStr, ";")
-									for _, line := range lines {
-										line = strings.TrimSpace(line)
-										if line != "" {
-											serviceContent.WriteString(fmt.Sprintf("\t%s\n", line))
-										}
-									}
-								} else if codeLines, ok := funcConfig.Code.([]interface{}); ok {
-									for _, line := range codeLines {
-										if lineStr, ok := line.(string); ok && lineStr != "" {
-											serviceContent.WriteString(fmt.Sprintf("\t%s\n", lineStr))
-										}
-									}
-								}
-							} else {
-								serviceContent.WriteString("\t// TODO: Implement logic\n")
-							}
-						}
-						serviceContent.WriteString("}\n\n")
+					}
+				}
+				// Проверяем параметры на time.Time
+				for _, paramType := range funcConfig.Parameters {
+					if paramType == "time.Time" {
+						allImports["time"] = true
 					}
 				}
 			}
 
-			if err := os.WriteFile(servicePath, []byte(serviceContent.String()), 0644); err != nil {
-				fmt.Printf("❌ Error writing service %s: %v\n", service, err)
-				os.Exit(1)
+			// Всегда добавляем log
+			allImports["log"] = true
+
+			// Записываем импорты
+			if len(allImports) > 0 {
+				serviceContent.WriteString("import (\n")
+				for importPath := range allImports {
+					serviceContent.WriteString(fmt.Sprintf("\t\"%s\"\n", importPath))
+				}
+				serviceContent.WriteString(")\n\n")
 			}
-			fmt.Printf("📄 Generated: %s\n", service)
+
+			// Генерируем функции
+			for funcName, funcConfig := range svcConfig.Functions {
+				serviceContent.WriteString(fmt.Sprintf("// %s - generated function\n", funcName))
+				serviceContent.WriteString(fmt.Sprintf("func %s(", funcName))
+
+				params := make([]string, 0)
+				for paramName, paramType := range funcConfig.Parameters {
+					params = append(params, fmt.Sprintf("%s %s", paramName, paramType))
+				}
+				serviceContent.WriteString(strings.Join(params, ", "))
+
+				if funcConfig.Model != "" {
+					// Находим путь к модели
+					var modelPath string
+					for _, model := range svcConfig.Models {
+						if model.Name == funcConfig.Model {
+							modelPath = model.Path
+							break
+						}
+					}
+
+					if modelPath != "" {
+						modelRef := getModelRef(modelPath, funcConfig.Model)
+						serviceContent.WriteString(fmt.Sprintf(") %s {\n", modelRef))
+					} else {
+						serviceContent.WriteString(fmt.Sprintf(") (*models.%s, error) {\n", funcConfig.Model))
+					}
+
+					// Пользовательский код из YAML (code поле)
+					hasReturn := false
+					if funcConfig.Code != nil {
+						if codeStr, ok := funcConfig.Code.(string); ok && codeStr != "" {
+							lines := strings.Split(codeStr, "\n")
+							for _, line := range lines {
+								line = strings.TrimSpace(line)
+								if line != "" {
+									serviceContent.WriteString(fmt.Sprintf("\t%s\n", line))
+									if strings.HasPrefix(line, "return") {
+										hasReturn = true
+									}
+								}
+							}
+						} else if codeLines, ok := funcConfig.Code.([]interface{}); ok {
+							for _, line := range codeLines {
+								if lineStr, ok := line.(string); ok && lineStr != "" {
+									serviceContent.WriteString(fmt.Sprintf("\t%s\n", lineStr))
+									if strings.HasPrefix(lineStr, "return") {
+										hasReturn = true
+									}
+								}
+							}
+						}
+					} else {
+						serviceContent.WriteString("\t// TODO: Implement logic\n")
+					}
+
+					// Добавляем return только если его нет в коде
+					if !hasReturn {
+						serviceContent.WriteString("\treturn nil, nil\n")
+					}
+				} else {
+					serviceContent.WriteString(") {\n")
+
+					// Пользовательский код из YAML (code поле)
+					if funcConfig.Code != nil {
+						if codeStr, ok := funcConfig.Code.(string); ok && codeStr != "" {
+							lines := strings.Split(codeStr, "\n")
+							for _, line := range lines {
+								line = strings.TrimSpace(line)
+								if line != "" && !strings.HasPrefix(line, "return") {
+									serviceContent.WriteString(fmt.Sprintf("\t%s\n", line))
+								}
+							}
+						} else if codeLines, ok := funcConfig.Code.([]interface{}); ok {
+							for _, line := range codeLines {
+								if lineStr, ok := line.(string); ok && lineStr != "" && !strings.HasPrefix(lineStr, "return") {
+									serviceContent.WriteString(fmt.Sprintf("\t%s\n", lineStr))
+								}
+							}
+						}
+					} else {
+						serviceContent.WriteString("\t// TODO: Implement logic\n")
+					}
+				}
+				serviceContent.WriteString("}\n\n")
+			}
+
+			// Записываем файл только если есть функции
+			if len(svcConfig.Functions) > 0 {
+				if err := os.WriteFile(servicePath, []byte(serviceContent.String()), 0644); err != nil {
+					fmt.Printf("❌ Error writing service %s: %v\n", serviceFile, err)
+					os.Exit(1)
+				}
+				fmt.Printf("📄 Generated: internal/core/services/%s\n", serviceFile)
+			}
 		}
 	}
 
@@ -305,10 +670,15 @@ go 1.25.4
 
 require (
 	github.com/Payel-git-ol/azure v0.1.4
+	github.com/Payel-git-ol/azure/env v0.0.0
 	gopkg.in/yaml.v3 v3.0.1
+	gorm.io/gorm v1.25.0
+	gorm.io/driver/postgres v1.5.0
 )
 
 replace github.com/Payel-git-ol/azure => ./azure
+
+replace github.com/Payel-git-ol/azure/env => ./azure/env
 `
 	if err := os.WriteFile(goModPath, []byte(goMod), 0644); err != nil {
 		fmt.Printf("❌ Error writing go.mod: %v\n", err)
@@ -325,11 +695,16 @@ replace github.com/Payel-git-ol/azure => ./azure
 }
 
 // generateMain генерирует main.go
-func generateMain(config *ProjectConfig) string {
+func generateMain(config *ProjectConfig, hasDatabase bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("package main\n\n")
 	sb.WriteString("import (\n")
+	if hasDatabase {
+		sb.WriteString("\t\"os\"\n")
+		sb.WriteString("\t\"your-project/pkg/database\"\n")
+		sb.WriteString("\t\"your-project/pkg/models\"\n")
+	}
 	sb.WriteString("\t\"github.com/Payel-git-ol/azure\"\n")
 	sb.WriteString("\t\"log\"\n")
 	sb.WriteString(")\n\n")
@@ -349,18 +724,26 @@ func generateMain(config *ProjectConfig) string {
 		}
 	}
 
+	// Добавляем инициализацию БД
+	if hasDatabase {
+		sb.WriteString("\n\t// Инициализация базы данных\n")
+		sb.WriteString("\tdatabase.InitDB(&models.User{})\n\n")
+	}
+
 	// Добавляем запуск сервера
 	port := "7070"
-	if config.Run != nil {
-		switch v := config.Run.(type) {
-		case string:
-			port = v
-		case int:
-			port = fmt.Sprintf("%d", v)
+	if config.Services != nil {
+		if mainSvc, ok := config.Services["main"]; ok && mainSvc.Run != nil {
+			switch v := mainSvc.Run.(type) {
+			case string:
+				port = v
+			case int:
+				port = fmt.Sprintf("%d", v)
+			}
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("\n\tlog.Println(\"🚀 Azure server starting on :%s\")\n", port))
+	sb.WriteString(fmt.Sprintf("\tlog.Println(\"🚀 Azure server starting on :%s\")\n", port))
 	sb.WriteString(fmt.Sprintf("\tif err := a.Run(\":%s\"); err != nil {\n", port))
 	sb.WriteString("\t\tlog.Fatalf(\"❌ Server error: %v\", err)\n")
 	sb.WriteString("\t}\n")
@@ -539,4 +922,35 @@ func generateConfigHandler(sb *strings.Builder, path string, config *HandlerConf
 	}
 
 	sb.WriteString("\t})\n")
+}
+
+// getPackageName извлекает имя пакета из пути
+func getPackageName(path string) string {
+	dir := filepath.Dir(path)
+	// Заменяем обратные слеши на прямые
+	dir = filepath.ToSlash(dir)
+	// Используем только последнюю часть пути (имя папки)
+	parts := strings.Split(dir, "/")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return "models"
+}
+
+// getModelImportPath возвращает полный путь импорта для модели
+func getModelImportPath(path string) string {
+	dir := filepath.Dir(path)
+	// Заменяем обратные слеши на прямые
+	dir = filepath.ToSlash(dir)
+	// Для путей вида pkg/models или pkg/requests
+	if strings.HasPrefix(dir, "pkg/") {
+		return "your-project/" + dir
+	}
+	return "your-project/" + dir
+}
+
+// getModelRef возвращает ссылку на модель с префиксом пакета
+func getModelRef(path string, modelName string) string {
+	pkgName := getPackageName(path)
+	return fmt.Sprintf("*%s.%s", pkgName, modelName)
 }
