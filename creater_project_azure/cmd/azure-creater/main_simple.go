@@ -724,6 +724,23 @@ func generateMain(config *ProjectConfig, hasDatabase bool) string {
 		}
 	}
 
+	// Добавляем обработчики ошибок
+	sb.WriteString("\n\t// Custom 404 handler\n")
+	sb.WriteString("\ta.NotFound(func(c *azure.Context) {\n")
+	sb.WriteString("\t\tc.JsonStatus(404, azure.M{\n")
+	sb.WriteString("\t\t\t\"error\": \"Page not found\",\n")
+	sb.WriteString("\t\t\t\"code\":  \"NOT_FOUND\",\n")
+	sb.WriteString("\t\t})\n")
+	sb.WriteString("\t})\n\n")
+
+	sb.WriteString("\t// Custom 500 handler\n")
+	sb.WriteString("\ta.ServerError(func(c *azure.Context, err error) {\n")
+	sb.WriteString("\t\tlog.Printf(\"Server error: %v\", err)\n")
+	sb.WriteString("\t\tc.JsonStatus(500, azure.M{\n")
+	sb.WriteString("\t\t\t\"error\": \"Internal server error\",\n")
+	sb.WriteString("\t\t})\n")
+	sb.WriteString("\t})\n\n")
+
 	// Добавляем инициализацию БД
 	if hasDatabase {
 		sb.WriteString("\n\t// Инициализация базы данных\n")

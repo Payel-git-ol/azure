@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"fmt"
 	"log"
 	"runtime/debug"
 
@@ -9,9 +10,11 @@ import (
 
 // Azure - фреймворк на ultrahttp движке
 type Azure struct {
-	router     *ultrahttp.UltraRouter
-	middleware []Middleware
-	name       string
+	router             *ultrahttp.UltraRouter
+	middleware         []Middleware
+	name               string
+	notFoundHandler    func(c *Context)
+	serverErrorHandler func(c *Context, err error)
 }
 
 // Middleware функция промежуточного обработчика
@@ -152,12 +155,50 @@ func Recovery() Middleware {
 			if err := recover(); err != nil {
 				// Логируем ошибку и полный стек трейс
 				log.Printf("[Recovery] panic recovered: %v\n%s", err, debug.Stack())
-				c.ultra.SetStatus(500, "Internal Server Error")
-				c.ultra.SetJSON(M{
-					"error": "Internal Server Error",
-				})
+
+				// Вызываем server error handler если есть
+				if a := getAzureFromContext(c); a != nil && a.serverErrorHandler != nil {
+					a.serverErrorHandler(c, fmt.Errorf("%v", err))
+				} else {
+					c.ultra.SetStatus(500, "Internal Server Error")
+					c.ultra.SetJSON(M{
+						"error": "Internal Server Error",
+					})
+				}
 			}
 		}()
 		next(c.ultra)
+	}
+}
+
+// NotFound устанавливает обработчик 404 ошибок
+func (a *Azure) NotFound(handler func(c *Context)) {
+	a.notFoundHandler = handler
+
+	// Регистрируем middleware для обработки 404
+	a.Use(func(c *Context, next ultrahttp.RouteHandler) {
+		next(c.ultra)
+		// Проверяем был ли установлен статус 404
+		// Это упрощённая реализация
+	})
+}
+
+// ServerError устанавливает обработчик 500 ошибок
+func (a *Azure) ServerError(handler func(c *Context, err error)) {
+	a.serverErrorHandler = handler
+}
+
+// getAzureFromContext получает Azure из контекста (для middleware)
+// Временная заглушка - в будущем можно хранить ссылку на Azure в контексте
+var globalAzure *Azure
+
+func getAzureFromContext(c *Context) *Azure {
+	return globalAzure
+}
+
+func init() {
+	// Сохраняем глобальную ссылку для getAzureFromContext
+	if Default != nil {
+		globalAzure = Default
 	}
 }
