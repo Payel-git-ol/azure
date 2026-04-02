@@ -91,3 +91,13 @@ func (c *Context) GetUltra() *ultrahttp.Context {
 func (c *Context) Context() context.Context {
 	return c.ultra.Context()
 }
+
+// GetRequest возвращает ultrahttp.Request
+func (c *Context) GetRequest() *ultrahttp.Request {
+	return &c.ultra.Request
+}
+
+// GetResponseWriter возвращает ultrahttp.Response
+func (c *Context) GetResponseWriter() *ultrahttp.Response {
+	return &c.ultra.Response
+}
